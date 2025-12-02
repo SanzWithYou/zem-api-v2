@@ -9,8 +9,8 @@ const corsErrorHandler = require('./middleware/corsErrorHandler');
 
 const app = express();
 
-// leep cel check
-app.get('/kaithhealthcheck', (req, res) => {
+// FIXED: Path now matches Leapcell's warmup request
+app.get('/kaithheathcheck', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
 
