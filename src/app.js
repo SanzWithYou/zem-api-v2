@@ -11,7 +11,7 @@ const app = express();
 
 // leep cel check
 app.get('/kaithhealthcheck', (req, res) => {
-  res.status(200).send('OK');
+  res.status(200).json({ status: 'ok' });
 });
 
 // CORS
