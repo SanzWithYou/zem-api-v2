@@ -1,5 +1,5 @@
 const express = require('express');
-const { healthCheck } = require('../controllers/healthController');
+const { healthCheck, testEmail } = require('../controllers/healthController');
 const {
   createOrder,
   getAllOrders,
@@ -10,6 +10,7 @@ const upload = require('../utils/upload').upload;
 const router = express.Router();
 
 router.get('/health', healthCheck);
+router.get('/test-email', testEmail);
 
 // Joki
 router.post('/joki/orders', upload.single('bukti_transfer'), createOrder);
