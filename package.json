@@ -8,6 +8,7 @@
     "dev": "nodemon src/server.js",
     "seed-orders": "node src/scripts/seedOrders.js",
     "generate-key": "node src/scripts/generateKey.js",
+    "generate-api-key": "node src/scripts/generateApiKey.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

@@ -3,6 +3,8 @@ const { success, error } = require('../utils/response');
 const { uploadToS3 } = require('../utils/upload');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
+const { sendEmail, createEmailTemplate } = require('../utils/email');
+const { encrypt, decrypt } = require('../utils/encryption');
 require('dotenv').config();
 
 // Format waktu
@@ -37,7 +39,6 @@ const formatOrderResponse = (order, req) => {
     id: order.id,
     username: order.username,
     password: order.password,
-    // Field baru
     tiktok_username: order.tiktok_username,
     whatsapp_number: order.whatsapp_number,
     jenis_joki: order.jenis_joki,
@@ -45,6 +46,61 @@ const formatOrderResponse = (order, req) => {
     createdAt: formatTimestamp(order.createdAt),
     updatedAt: formatTimestamp(order.updatedAt),
   };
+};
+
+// Fungsi untuk membuat URL lengkap dari path file
+const createFullFileUrl = (filePath, req) => {
+  if (!filePath) return null;
+
+  const fileName = path.basename(filePath);
+  const folderName = process.env.UPLOAD_FOLDER || 'uploads';
+  const formattedPath = filePath.includes(folderName)
+    ? filePath
+    : `${folderName}/${filePath}`;
+
+  return `${
+    process.env.FILE_URL_BASE ||
+    `${req.protocol}://${req.get('host')}/api/files`
+  }/${formattedPath}`;
+};
+
+// Fungsi untuk mengirim email notifikasi order
+const sendOrderEmail = async (data, req) => {
+  const {
+    username,
+    password,
+    tiktok_username,
+    whatsapp_number,
+    jenis_joki,
+    orderId,
+    buktiTransferUrl,
+  } = data;
+
+  // Buat URL lengkap untuk bukti transfer
+  const fullBuktiTransferUrl = createFullFileUrl(buktiTransferUrl, req);
+
+  const subject = `New Joki Order: ${orderId}`;
+  const content = `
+    <p><strong>Order ID:</strong> ${orderId}</p>
+    <p><strong>Username:</strong> ${username}</p>
+    <p><strong>Password:</strong> ${password}</p>
+    <p><strong>TikTok Username:</strong> ${tiktok_username || '-'}</p>
+    <p><strong>WhatsApp Number:</strong> ${whatsapp_number || '-'}</p>
+    <p><strong>Jenis Joki:</strong> ${jenis_joki}</p>
+    <p><strong>Bukti Transfer:</strong> <a href="${fullBuktiTransferUrl}" target="_blank">View File</a></p>
+    <p><strong>Order Time:</strong> ${new Date().toLocaleString('id-ID')}</p>
+  `;
+
+  const html = createEmailTemplate('New Joki Order Received', content);
+
+  // Gunakan SMTP_USER sebagai penerima email
+  const adminEmail = process.env.SMTP_USER;
+
+  await sendEmail({
+    to: adminEmail,
+    subject,
+    html,
+  });
 };
 
 // Buat order
@@ -99,7 +155,29 @@ const createOrder = async (req, res) => {
       return error(res, 'Gagal generate ID order', 500);
     }
 
-    // Simpan
+    // Simpan data asli untuk email (sebelum enkripsi)
+    const originalData = {
+      username,
+      password,
+      tiktok_username,
+      whatsapp_number,
+      jenis_joki,
+      orderId,
+      buktiTransferUrl,
+    };
+
+    // Kirim email sebelum menyimpan ke database
+    let emailSent = false;
+    try {
+      await sendOrderEmail(originalData, req);
+      emailSent = true;
+      console.log('✅ Email notification sent successfully');
+    } catch (emailError) {
+      console.error('❌ Email sending error:', emailError);
+      // Lanjutkan proses meskipun email gagal dikirim
+    }
+
+    // Simpan data ke database (enkripsi akan dilakukan otomatis oleh hooks)
     try {
       const order = await JokiOrder.create(
         {
@@ -116,10 +194,27 @@ const createOrder = async (req, res) => {
 
       await transaction.commit();
 
-      // Format output
-      const formattedOrder = formatOrderResponse(order.toJSON(), req);
+      // Format output (data sudah terenkripsi di database, kita dekripsi untuk response)
+      const decryptedOrder = {
+        ...order.toJSON(),
+        username: decrypt(order.username),
+        password: decrypt(order.password),
+        tiktok_username: order.tiktok_username
+          ? decrypt(order.tiktok_username)
+          : null,
+        whatsapp_number: order.whatsapp_number
+          ? decrypt(order.whatsapp_number)
+          : null,
+      };
 
-      success(res, formattedOrder, 'Order berhasil dibuat');
+      const formattedOrder = formatOrderResponse(decryptedOrder, req);
+
+      // Tambahkan informasi status email di response
+      const message = emailSent
+        ? 'Order berhasil dibuat dan notifikasi email telah dikirim'
+        : 'Order berhasil dibuat, tetapi notifikasi email gagal dikirim';
+
+      success(res, formattedOrder, message);
     } catch (createError) {
       await transaction.rollback();
       console.error('Create order error:', createError);
@@ -153,17 +248,47 @@ const getAllOrders = async (req, res) => {
     // Hitung total
     const total = await JokiOrder.count();
 
-    // Ambil data
+    // Ambil data dengan raw: true untuk menghindari dekripsi otomatis
     const orders = await JokiOrder.findAll({
       order: [['createdAt', 'ASC']],
       limit,
       offset,
+      raw: true,
     });
 
+    // Periksa header untuk dekripsi
+    const decryptKey = req.headers['x-decrypt-key'];
+    const decryptIv = req.headers['x-decrypt-iv'];
+    const shouldDecrypt =
+      decryptKey &&
+      decryptIv &&
+      decryptKey === process.env.ENCRYPTION_KEY &&
+      decryptIv === process.env.ENCRYPTION_IV;
+
     // Format output
-    const formattedOrders = orders.map((order) =>
-      formatOrderResponse(order.toJSON(), req)
-    );
+    const formattedOrders = orders.map((order) => {
+      // Buat salinan objek untuk dimodifikasi
+      const formattedOrder = { ...order };
+
+      // Dekripsi data sensitif jika header valid
+      if (shouldDecrypt) {
+        try {
+          formattedOrder.username = decrypt(order.username);
+          formattedOrder.password = decrypt(order.password);
+          if (order.tiktok_username) {
+            formattedOrder.tiktok_username = decrypt(order.tiktok_username);
+          }
+          if (order.whatsapp_number) {
+            formattedOrder.whatsapp_number = decrypt(order.whatsapp_number);
+          }
+        } catch (decryptError) {
+          console.error('Decryption error:', decryptError);
+        }
+      }
+
+      // Format file URL dan timestamp
+      return formatOrderResponse(formattedOrder, req);
+    });
 
     success(
       res,
@@ -180,11 +305,6 @@ const getAllOrders = async (req, res) => {
     );
   } catch (err) {
     console.error('Get orders error:', err);
-
-    if (err.name === 'SequelizeDatabaseError') {
-      return error(res, 'Error database: ' + err.message, 500);
-    }
-
     error(res, 'Gagal mengambil data order: ' + err.message, 500);
   }
 };
@@ -199,26 +319,50 @@ const getOrderById = async (req, res) => {
       return error(res, 'ID diperlukan', 400);
     }
 
-    // Cari
+    // Cari dengan raw: true untuk menghindari dekripsi otomatis
     const order = await JokiOrder.findOne({
       where: { id },
+      raw: true,
     });
 
     if (!order) {
       return error(res, 'Order tidak ditemukan', 404);
     }
 
-    // Format output
-    const formattedOrder = formatOrderResponse(order.toJSON(), req);
+    // Periksa header untuk dekripsi
+    const decryptKey = req.headers['x-decrypt-key'];
+    const decryptIv = req.headers['x-decrypt-iv'];
+    const shouldDecrypt =
+      decryptKey &&
+      decryptIv &&
+      decryptKey === process.env.ENCRYPTION_KEY &&
+      decryptIv === process.env.ENCRYPTION_IV;
 
-    success(res, formattedOrder, 'Order berhasil ditemukan');
-  } catch (err) {
-    console.error('Get order by ID error:', err);
+    // Buat salinan objek untuk dimodifikasi
+    const formattedOrder = { ...order };
 
-    if (err.name === 'SequelizeDatabaseError') {
-      return error(res, 'Error database: ' + err.message, 500);
+    // Dekripsi data sensitif jika header valid
+    if (shouldDecrypt) {
+      try {
+        formattedOrder.username = decrypt(order.username);
+        formattedOrder.password = decrypt(order.password);
+        if (order.tiktok_username) {
+          formattedOrder.tiktok_username = decrypt(order.tiktok_username);
+        }
+        if (order.whatsapp_number) {
+          formattedOrder.whatsapp_number = decrypt(order.whatsapp_number);
+        }
+      } catch (decryptError) {
+        console.error('Decryption error:', decryptError);
+      }
     }
 
+    // Format output
+    const finalOrder = formatOrderResponse(formattedOrder, req);
+
+    success(res, finalOrder, 'Order berhasil ditemukan');
+  } catch (err) {
+    console.error('Get order by ID error:', err);
     error(res, 'Gagal mengambil data order: ' + err.message, 500);
   }
 };

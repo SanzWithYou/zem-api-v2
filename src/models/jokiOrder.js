@@ -12,46 +12,18 @@ module.exports = (sequelize, DataTypes) => {
       username: {
         type: DataTypes.STRING,
         allowNull: false,
-        set(value) {
-          this.setDataValue('username', encrypt(value));
-        },
-        get() {
-          const rawValue = this.getDataValue('username');
-          return decrypt(rawValue);
-        },
       },
       password: {
         type: DataTypes.STRING,
         allowNull: false,
-        set(value) {
-          this.setDataValue('password', encrypt(value));
-        },
-        get() {
-          const rawValue = this.getDataValue('password');
-          return decrypt(rawValue);
-        },
       },
       tiktok_username: {
         type: DataTypes.STRING,
         allowNull: true,
-        set(value) {
-          this.setDataValue('tiktok_username', value ? encrypt(value) : null);
-        },
-        get() {
-          const rawValue = this.getDataValue('tiktok_username');
-          return rawValue ? decrypt(rawValue) : null;
-        },
       },
       whatsapp_number: {
         type: DataTypes.STRING,
         allowNull: true,
-        set(value) {
-          this.setDataValue('whatsapp_number', value ? encrypt(value) : null);
-        },
-        get() {
-          const rawValue = this.getDataValue('whatsapp_number');
-          return rawValue ? decrypt(rawValue) : null;
-        },
       },
       jenis_joki: {
         type: DataTypes.STRING,
@@ -72,6 +44,34 @@ module.exports = (sequelize, DataTypes) => {
     },
     {
       tableName: 'joki_orders',
+      hooks: {
+        beforeCreate: (order) => {
+          // Enkripsi data sebelum disimpan
+          order.username = encrypt(order.username);
+          order.password = encrypt(order.password);
+          if (order.tiktok_username) {
+            order.tiktok_username = encrypt(order.tiktok_username);
+          }
+          if (order.whatsapp_number) {
+            order.whatsapp_number = encrypt(order.whatsapp_number);
+          }
+        },
+        beforeUpdate: (order) => {
+          // Enkripsi data sebelum diupdate
+          if (order.changed('username')) {
+            order.username = encrypt(order.username);
+          }
+          if (order.changed('password')) {
+            order.password = encrypt(order.password);
+          }
+          if (order.changed('tiktok_username') && order.tiktok_username) {
+            order.tiktok_username = encrypt(order.tiktok_username);
+          }
+          if (order.changed('whatsapp_number') && order.whatsapp_number) {
+            order.whatsapp_number = encrypt(order.whatsapp_number);
+          }
+        },
+      },
     }
   );
 

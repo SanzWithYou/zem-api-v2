@@ -6,6 +6,7 @@ const {
   getOrderById,
 } = require('../controllers/jokiController');
 const { serveFile } = require('../controllers/fileController');
+const apiKeyMiddleware = require('../middleware/apiKey');
 const upload = require('../utils/upload').upload;
 const router = express.Router();
 
@@ -14,8 +15,8 @@ router.get('/test-email', testEmail);
 
 // Joki
 router.post('/joki/orders', upload.single('bukti_transfer'), createOrder);
-router.get('/joki/orders', getAllOrders);
-router.get('/joki/orders/:id', getOrderById);
+router.get('/joki/orders', apiKeyMiddleware, getAllOrders);
+router.get('/joki/orders/:id', apiKeyMiddleware, getOrderById);
 
 router.get('/files/:folder/:filename', serveFile);
 
