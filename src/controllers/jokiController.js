@@ -52,14 +52,8 @@ const createOrder = async (req, res) => {
   const transaction = await JokiOrder.sequelize.transaction();
 
   try {
-    const {
-      username,
-      password,
-      jenis_joki,
-      // Field baru
-      tiktok_username,
-      whatsapp_number,
-    } = req.body;
+    const { username, password, jenis_joki, tiktok_username, whatsapp_number } =
+      req.body;
     const buktiTransfer = req.file;
 
     // Validasi
@@ -112,7 +106,6 @@ const createOrder = async (req, res) => {
           id: orderId,
           username,
           password,
-          // Field baru
           tiktok_username,
           whatsapp_number,
           jenis_joki,

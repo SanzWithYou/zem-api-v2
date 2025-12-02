@@ -31,7 +31,6 @@ module.exports = (sequelize, DataTypes) => {
           return decrypt(rawValue);
         },
       },
-      // Kolom baru
       tiktok_username: {
         type: DataTypes.STRING,
         allowNull: true,
