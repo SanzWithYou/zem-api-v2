@@ -1,5 +1,3 @@
-// utils/countryDetector.js
-
 // Data negara yang didukung
 const SUPPORTED_COUNTRIES = {
   id: {
@@ -101,16 +99,31 @@ const detectCountryFromIP = async () => {
 // Deteksi negara dari IP client
 const detectCountryFromClientIP = async (req) => {
   try {
-    // Dapatkan IP client
-    const clientIP =
-      req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+    // Dapatkan IP client dengan lebih baik
+    let clientIP =
+      req.headers['x-forwarded-for'] ||
+      req.headers['x-real-ip'] ||
+      req.connection.remoteAddress ||
+      req.socket.remoteAddress;
 
-    // Jika IP adalah localhost atau tidak valid, gunakan API ipapi.co tanpa parameter
-    if (!clientIP || clientIP === '::1' || clientIP === '127.0.0.1') {
+    // Jika x-forwarded-for berisi beberapa IP, ambil yang pertama
+    if (clientIP && clientIP.includes(',')) {
+      clientIP = clientIP.split(',')[0].trim();
+    }
+
+    // Jika IP adalah localhost atau private network, gunakan API tanpa parameter
+    if (
+      !clientIP ||
+      clientIP === '::1' ||
+      clientIP === '127.0.0.1' ||
+      clientIP.startsWith('192.168.') ||
+      clientIP.startsWith('10.') ||
+      clientIP.startsWith('172.')
+    ) {
       return await detectCountryFromIP();
     }
 
-    // Untuk IP client, gunakan API ipapi.co dengan parameter IP
+    // Untuk IP client, gunakan API dengan parameter IP
     const response = await fetch(`https://ipapi.co/${clientIP}/json/`);
     const data = await response.json();
 

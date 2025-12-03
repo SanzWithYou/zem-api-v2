@@ -13,7 +13,7 @@ const {
 require('dotenv').config();
 
 // Format output sederhana
-const formatOrderResponse = (order, req) => {
+const formatOrderResponse = async (order, req) => {
   let fileUrl = null;
   if (order.bukti_transfer) {
     const fileName = path.basename(order.bukti_transfer);
@@ -27,8 +27,22 @@ const formatOrderResponse = (order, req) => {
     }/${filePath}`;
   }
 
-  // Deteksi negara dari nomor WhatsApp untuk timezone
-  const countryCode = 'id'; // Default ke Indonesia untuk format timestamp
+  // Deteksi negara dari header atau IP untuk timezone
+  let countryCode = 'id'; // Default ke Indonesia
+  try {
+    // Prioritas 1: Cek header dari frontend
+    if (req.headers['x-country-code']) {
+      countryCode = req.headers['x-country-code'].toLowerCase();
+      console.log(`🌍 Country detected from header: ${countryCode}`);
+    }
+    // Prioritas 2: Deteksi dari IP jika header tidak ada
+    else {
+      countryCode = await detectCountryFromClientIP(req);
+      console.log(`🌍 Country detected from IP: ${countryCode}`);
+    }
+  } catch (countryError) {
+    console.error('Country detection error:', countryError);
+  }
 
   return {
     id: order.id,
@@ -153,11 +167,19 @@ const createOrder = async (req, res) => {
       return error(res, 'Gagal generate ID order', 500);
     }
 
-    // Deteksi negara dari IP client
+    // Deteksi negara dari header atau IP
     let countryCode = 'id'; // Default ke Indonesia
     try {
-      countryCode = await detectCountryFromClientIP(req);
-      console.log(`🌍 Country detected from IP: ${countryCode}`);
+      // Prioritas 1: Cek header dari frontend
+      if (req.headers['x-country-code']) {
+        countryCode = req.headers['x-country-code'].toLowerCase();
+        console.log(`🌍 Country detected from header: ${countryCode}`);
+      }
+      // Prioritas 2: Deteksi dari IP jika header tidak ada
+      else {
+        countryCode = await detectCountryFromClientIP(req);
+        console.log(`🌍 Country detected from IP: ${countryCode}`);
+      }
     } catch (countryError) {
       console.error('Country detection error:', countryError);
     }
@@ -214,7 +236,7 @@ const createOrder = async (req, res) => {
           : null,
       };
 
-      const formattedOrder = formatOrderResponse(decryptedOrder, req);
+      const formattedOrder = await formatOrderResponse(decryptedOrder, req);
 
       // Tambahkan informasi status email di response
       const message = emailSent
@@ -273,29 +295,31 @@ const getAllOrders = async (req, res) => {
       decryptIv === process.env.ENCRYPTION_IV;
 
     // Format output
-    const formattedOrders = orders.map((order) => {
-      // Buat salinan objek untuk dimodifikasi
-      const formattedOrder = { ...order };
+    const formattedOrders = await Promise.all(
+      orders.map(async (order) => {
+        // Buat salinan objek untuk dimodifikasi
+        const formattedOrder = { ...order };
 
-      // Dekripsi data sensitif jika header valid
-      if (shouldDecrypt) {
-        try {
-          formattedOrder.username = decrypt(order.username);
-          formattedOrder.password = decrypt(order.password);
-          if (order.tiktok_username) {
-            formattedOrder.tiktok_username = decrypt(order.tiktok_username);
+        // Dekripsi data sensitif jika header valid
+        if (shouldDecrypt) {
+          try {
+            formattedOrder.username = decrypt(order.username);
+            formattedOrder.password = decrypt(order.password);
+            if (order.tiktok_username) {
+              formattedOrder.tiktok_username = decrypt(order.tiktok_username);
+            }
+            if (order.whatsapp_number) {
+              formattedOrder.whatsapp_number = decrypt(order.whatsapp_number);
+            }
+          } catch (decryptError) {
+            console.error('Decryption error:', decryptError);
           }
-          if (order.whatsapp_number) {
-            formattedOrder.whatsapp_number = decrypt(order.whatsapp_number);
-          }
-        } catch (decryptError) {
-          console.error('Decryption error:', decryptError);
         }
-      }
 
-      // Format file URL dan timestamp
-      return formatOrderResponse(formattedOrder, req);
-    });
+        // Format file URL dan timestamp
+        return await formatOrderResponse(formattedOrder, req);
+      })
+    );
 
     success(
       res,
@@ -365,7 +389,7 @@ const getOrderById = async (req, res) => {
     }
 
     // Format output
-    const finalOrder = formatOrderResponse(formattedOrder, req);
+    const finalOrder = await formatOrderResponse(formattedOrder, req);
 
     success(res, finalOrder, 'Order berhasil ditemukan');
   } catch (err) {
