@@ -5,22 +5,14 @@ const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const { sendEmail, createEmailTemplate } = require('../utils/email');
 const { encrypt, decrypt } = require('../utils/encryption');
+const {
+  detectCountryFromClientIP,
+  getCountryInfo,
+  formatTimestamp,
+} = require('../utils/countryDetector');
 require('dotenv').config();
 
-// Format waktu
-const formatTimestamp = (timestamp) => {
-  return new Date(timestamp).toLocaleString('id-ID', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
-};
-
-// Format output
+// Format output sederhana
 const formatOrderResponse = (order, req) => {
   let fileUrl = null;
   if (order.bukti_transfer) {
@@ -35,6 +27,9 @@ const formatOrderResponse = (order, req) => {
     }/${filePath}`;
   }
 
+  // Deteksi negara dari nomor WhatsApp untuk timezone
+  const countryCode = 'id'; // Default ke Indonesia untuk format timestamp
+
   return {
     id: order.id,
     username: order.username,
@@ -43,8 +38,8 @@ const formatOrderResponse = (order, req) => {
     whatsapp_number: order.whatsapp_number,
     jenis_joki: order.jenis_joki,
     bukti_transfer: fileUrl,
-    createdAt: formatTimestamp(order.createdAt),
-    updatedAt: formatTimestamp(order.updatedAt),
+    createdAt: formatTimestamp(order.createdAt, countryCode),
+    updatedAt: formatTimestamp(order.updatedAt, countryCode),
   };
 };
 
@@ -64,8 +59,8 @@ const createFullFileUrl = (filePath, req) => {
   }/${formattedPath}`;
 };
 
-// Fungsi untuk mengirim email notifikasi order
-const sendOrderEmail = async (data, req) => {
+// Fungsi untuk mengirim email notifikasi order (sederhana)
+const sendOrderEmail = async (data, req, countryCode = 'id') => {
   const {
     username,
     password,
@@ -88,7 +83,10 @@ const sendOrderEmail = async (data, req) => {
     <p><strong>WhatsApp Number:</strong> ${whatsapp_number || '-'}</p>
     <p><strong>Jenis Joki:</strong> ${jenis_joki}</p>
     <p><strong>Bukti Transfer:</strong> <a href="${fullBuktiTransferUrl}" target="_blank">View File</a></p>
-    <p><strong>Order Time:</strong> ${new Date().toLocaleString('id-ID')}</p>
+    <p><strong>Order Time:</strong> ${formatTimestamp(
+      new Date(),
+      countryCode
+    )}</p>
   `;
 
   const html = createEmailTemplate('New Joki Order Received', content);
@@ -155,6 +153,15 @@ const createOrder = async (req, res) => {
       return error(res, 'Gagal generate ID order', 500);
     }
 
+    // Deteksi negara dari IP client
+    let countryCode = 'id'; // Default ke Indonesia
+    try {
+      countryCode = await detectCountryFromClientIP(req);
+      console.log(`🌍 Country detected from IP: ${countryCode}`);
+    } catch (countryError) {
+      console.error('Country detection error:', countryError);
+    }
+
     // Simpan data asli untuk email (sebelum enkripsi)
     const originalData = {
       username,
@@ -169,7 +176,7 @@ const createOrder = async (req, res) => {
     // Kirim email sebelum menyimpan ke database
     let emailSent = false;
     try {
-      await sendOrderEmail(originalData, req);
+      await sendOrderEmail(originalData, req, countryCode);
       emailSent = true;
       console.log('✅ Email notification sent successfully');
     } catch (emailError) {
